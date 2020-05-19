@@ -17,14 +17,21 @@ package com.example.android.pets;
 
 import android.app.AlertDialog;
 import android.app.LoaderManager;
+import android.arch.lifecycle.LifecycleOwner;
+import android.arch.lifecycle.Observer;
+import android.arch.lifecycle.ViewModelProvider;
+import android.arch.lifecycle.ViewModelProviders;
 import android.content.ContentValues;
+import android.content.Context;
 import android.content.CursorLoader;
 import android.content.DialogInterface;
 import android.content.Intent;
 import android.content.Loader;
 import android.database.Cursor;
 import android.net.Uri;
+import android.os.AsyncTask;
 import android.os.Bundle;
+import android.support.annotation.Nullable;
 import android.support.v4.app.NavUtils;
 import android.support.v7.app.AppCompatActivity;
 import android.text.TextUtils;
@@ -38,12 +45,25 @@ import android.widget.EditText;
 import android.widget.Spinner;
 import android.widget.Toast;
 
-import com.example.android.pets.data.PetContract.PetEntry;
+import com.example.android.pets.data.PetEntry;
+import com.example.android.pets.data.PetsDatabase;
+
+import java.lang.ref.WeakReference;
 
 /**
  * Allows user to create a new pet or edit an existing one.
  */
-public class EditorActivity extends AppCompatActivity implements LoaderManager.LoaderCallbacks<Cursor> {
+public class EditorActivity extends AppCompatActivity {
+
+    public static final String EXTRA_PET_ID = "extraPetId";
+
+    public static final String INSTANCE_PET_ID = "instancePetid";
+
+    private static final int DEFAULT_PET_ID = -1;
+
+    private int mPetId = DEFAULT_PET_ID;
+
+    private PetsDatabase mDb;
 
     //CHecking if the user has saved after changing or not
     private boolean mPetHasChanged = false;
@@ -76,7 +96,7 @@ public class EditorActivity extends AppCompatActivity implements LoaderManager.L
     private Spinner mGenderSpinner;
 
     /**
-     * Gender of the pet. The possible valid values are in the PetContract.java file:
+     * Gender of the pet. The possible valid values are in the PetEntry.java file:
      * {@link PetEntry#GENDER_UNKNOWN}, {@link PetEntry#GENDER_MALE}, or
      * {@link PetEntry#GENDER_FEMALE}.
      */
@@ -87,25 +107,54 @@ public class EditorActivity extends AppCompatActivity implements LoaderManager.L
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_editor);
 
+        mDb = PetsDatabase.getInstance(getApplicationContext());
+
+        initViews();
+        setupSpinner();
+
+        if(savedInstanceState != null && savedInstanceState.containsKey(INSTANCE_PET_ID)){
+            mPetId = savedInstanceState.getInt(INSTANCE_PET_ID, DEFAULT_PET_ID);
+        }
+
         //Examine the intent that used to launch this activity
         Intent intent = getIntent();
-        mCurrentPetUri = intent.getData();
 
-        //If the intent DOES NOT contain a pet content URI, then we know that we are creating a new pet
-        if(mCurrentPetUri==null) {
-            //This is a new pet, so change the app bar to say "Add a Pet"
-            setTitle("Add a Pet");
+        if(intent != null && intent.hasExtra(EXTRA_PET_ID)){
 
-            // Invalidate the options menu, so the "Delete" menu option can be hidden.
-            // (It doesn't make sense to delete a pet that hasn't been created yet.)
-            invalidateOptionsMenu();
-        }else{
-            //Otherwise this is an exisitng pet, so change app bar to say "Edit Pet"
             setTitle(getString(R.string.editor_activity_title_edit_pet));
 
-            //Getting loader manager
-            getLoaderManager().initLoader(EXISTING_PET_LOADER, null, this);
+            if(mPetId == DEFAULT_PET_ID){
+                //Populate the UI
+                mPetId = intent.getIntExtra(EXTRA_PET_ID, DEFAULT_PET_ID);
+                AddPetViewModelFactory factory = new AddPetViewModelFactory(mDb, mPetId);
+                final AddPetViewModel viewModel =
+                        ViewModelProviders.of(EditorActivity.this,
+                                factory).get(AddPetViewModel.class);
+                viewModel.getPet().observe((LifecycleOwner) EditorActivity.this, new Observer<PetEntry>() {
+                    @Override
+                    public void onChanged(@Nullable PetEntry petEntry) {
+                        viewModel.getPet().removeObserver(this);
+                        populateUI(petEntry);
+                    }
+                });
+            }
+        }else{
+            //Otherwise this is an exisitng pet, so change app bar to say "Edit Pet"
+            setTitle(getString(R.string.editor_activity_title_new_pet));
+
+            invalidateOptionsMenu();
         }
+
+
+    }
+
+    @Override
+    protected void onSaveInstanceState(Bundle outState){
+        outState.putInt(INSTANCE_PET_ID, mPetId);
+        super.onSaveInstanceState(outState);
+    }
+
+    private void initViews(){
 
         // Find all relevant views that we will need to read user input from
         mNameEditText = (EditText) findViewById(R.id.edit_pet_name);
@@ -119,9 +168,33 @@ public class EditorActivity extends AppCompatActivity implements LoaderManager.L
         mWeightEditText.setOnTouchListener(mTouchListener);
         mGenderSpinner.setOnTouchListener(mTouchListener);
 
-        setupSpinner();
+    }
 
+    private void populateUI(PetEntry pet){
+        if (pet == null){
+            return;
+        }
 
+        String name  = pet.getName();
+        String breed = pet.getBreed();
+        int gender = pet.getGender();
+        int weight = pet.getWeight();
+
+        mNameEditText.setText(name);
+        mBreedEditText.setText(breed);
+        mWeightEditText.setText(Integer.toString(weight));
+
+        switch (gender){
+            case PetEntry.GENDER_MALE:
+                mGenderSpinner.setSelection(1);
+                break;
+            case PetEntry.GENDER_FEMALE:
+                mGenderSpinner.setSelection(2);
+                break;
+            default:
+                mGenderSpinner.setSelection(0);
+                break;
+        }
     }
 
     //Sets up a discard dialog box
@@ -229,7 +302,7 @@ public class EditorActivity extends AppCompatActivity implements LoaderManager.L
         String weightString = mWeightEditText.getText().toString().trim();
 
         //Checking if null values are inserted
-        if(mCurrentPetUri==null && TextUtils.isEmpty(nameString)&&TextUtils.isEmpty(breedString)&&TextUtils.isEmpty(weightString)&&mGender==PetEntry.GENDER_UNKNOWN){
+        if(mPetId == DEFAULT_PET_ID && TextUtils.isEmpty(nameString)&&TextUtils.isEmpty(breedString)&&TextUtils.isEmpty(weightString)&&mGender==PetEntry.GENDER_UNKNOWN){
             return;
         }
 
@@ -237,47 +310,19 @@ public class EditorActivity extends AppCompatActivity implements LoaderManager.L
              weight = Integer.parseInt(weightString);
         }
 
-        // Create a ContentValues object where column names are the keys,
-        // and pet attributes from the editor are the values.
-        ContentValues values = new ContentValues();
-        values.put(PetEntry.COLUMN_PET_NAME, nameString);
-        values.put(PetEntry.COLUMN_PET_BREED, breedString);
-        values.put(PetEntry.COLUMN_PET_GENDER, mGender);
-        values.put(PetEntry.COLUMN_PET_WEIGHT, weight);
+        PetEntry petEntry = new PetEntry(nameString, breedString, mGender, weight);
 
-        if(mCurrentPetUri==null){
-            // Insert a new pet into the provider, returning the content URI for the new pet.
-            Uri newUri = getContentResolver().insert(PetEntry.CONTENT_URI, values);
-
-            // Show a toast message depending on whether or not the insertion was successful
-            if (newUri == null) {
-                // If the new content URI is null, then there was an error with insertion.
-                Toast.makeText(this, getString(R.string.editor_insert_pet_failed),
-                        Toast.LENGTH_SHORT).show();
-            } else {
-                // Otherwise, the insertion was successful and we can display a toast.
-                Toast.makeText(this, getString(R.string.editor_insert_pet_successful),
-                        Toast.LENGTH_SHORT).show();
-            }
-        }else{
-            // Otherwise this is an EXISTING pet, so update the pet with content URI: mCurrentPetUri
-            // and pass in the new ContentValues. Pass in null for the selection and selection args
-            // because mCurrentPetUri will already identify the correct row in the database that
-            // we want to modify.
-            int rowsAffected = getContentResolver().update(mCurrentPetUri, values, null, null);
-
-            // Show a toast message depending on whether or not the update was successful.
-            if (rowsAffected == 0) {
-                // If no rows were affected, then there was an error with the update.
-                Toast.makeText(this, getString(R.string.editor_update_pet_failed),
-                        Toast.LENGTH_SHORT).show();
-            } else {
-                // Otherwise, the update was successful and we can display a toast.
-                Toast.makeText(this, getString(R.string.editor_update_pet_successful),
-                        Toast.LENGTH_SHORT).show();
-            }
-
+        if(mPetId == DEFAULT_PET_ID){
+            //This is a NEW PET
+            new InsertPetTask(getApplicationContext()).execute(petEntry);
+              // Show a toast message depending on whether or not the insertion was successful
+        }else {
+            //Otherwise this is an Existing pet
+            petEntry.setId(mPetId);
+            new UpdatePetTask(getApplicationContext()).execute(petEntry);
         }
+
+        finish();
     }
 
     @Override
@@ -285,6 +330,19 @@ public class EditorActivity extends AppCompatActivity implements LoaderManager.L
         // Inflate the menu options from the res/menu/menu_editor.xml file.
         // This adds menu items to the app bar.
         getMenuInflater().inflate(R.menu.menu_editor, menu);
+        return true;
+    }
+
+    //Hides delete if it is a new pet
+    //This method is called after invalidateOptionsMenu(), so that the menu can be updated
+    //some menu items can be hidden or made visible
+    @Override
+    public boolean onPrepareOptionsMenu(Menu menu){
+        super.onPrepareOptionsMenu(menu);
+        if(mPetId == DEFAULT_PET_ID){
+            MenuItem menuItem = menu.findItem(R.id.action_delete);
+            menuItem.setVisible(false);
+        }
         return true;
     }
 
@@ -333,94 +391,6 @@ public class EditorActivity extends AppCompatActivity implements LoaderManager.L
         return super.onOptionsItemSelected(item);
     }
 
-    @Override
-    public Loader<Cursor> onCreateLoader(int i, Bundle bundle) {
-        // Since the editor shows all pet attributes, define a projection that contains
-        // all columns from the pet table
-        String[] projection = {
-                PetEntry._ID,
-                PetEntry.COLUMN_PET_NAME,
-                PetEntry.COLUMN_PET_BREED,
-                PetEntry.COLUMN_PET_GENDER,
-                PetEntry.COLUMN_PET_WEIGHT };
-
-        // This loader will execute the ContentProvider's query method on a background thread
-        return new CursorLoader(this,   // Parent activity context
-                mCurrentPetUri,         // Query the content URI for the current pet
-                projection,             // Columns to include in the resulting Cursor
-                null,                   // No selection clause
-                null,                   // No selection arguments
-                null);                  // Default sort order
-    }
-
-    @Override
-    public void onLoadFinished(Loader<Cursor> loader, Cursor cursor) {
-        //Bail early if the cursor is null or there is less than 1 row in the cursor
-        if(cursor==null||cursor.getCount()<1){
-            return;
-        }
-
-        //Proceed with moving to the first row of the cursor and reading data from it
-        //(This should be the only row in the cursor)
-        if(cursor.moveToFirst()){
-            // Find the columns of pet attributes that we're interested in
-            int nameColumnIndex = cursor.getColumnIndex(PetEntry.COLUMN_PET_NAME);
-            int breedColumnIndex = cursor.getColumnIndex(PetEntry.COLUMN_PET_BREED);
-            int genderColumnIndex = cursor.getColumnIndex(PetEntry.COLUMN_PET_GENDER);
-            int weightColumnIndex = cursor.getColumnIndex(PetEntry.COLUMN_PET_WEIGHT);
-
-            // Extract out the value from the Cursor for the given column index
-            String name = cursor.getString(nameColumnIndex);
-            String breed = cursor.getString(breedColumnIndex);
-            int gender = cursor.getInt(genderColumnIndex);
-            int weight = cursor.getInt(weightColumnIndex);
-
-            // Update the views on the screen with the values from the database
-            mNameEditText.setText(name);
-            mBreedEditText.setText(breed);
-            mWeightEditText.setText(Integer.toString(weight));
-
-            // Gender is a dropdown spinner, so map the constant value from the database
-            // into one of the dropdown options (0 is Unknown, 1 is Male, 2 is Female).
-            // Then call setSelection() so that option is displayed on screen as the current selection.
-            switch (gender) {
-                case PetEntry.GENDER_MALE:
-                    mGenderSpinner.setSelection(1);
-                    break;
-                case PetEntry.GENDER_FEMALE:
-                    mGenderSpinner.setSelection(2);
-                    break;
-                default:
-                    mGenderSpinner.setSelection(0);
-                    break;
-            }
-        }
-
-    }
-
-    @Override
-    public void onLoaderReset(Loader<Cursor> loader) {
-        // If the loader is invalidated, clear out all the data from the input fields.
-        mNameEditText.setText("");
-        mBreedEditText.setText("");
-        mWeightEditText.setText("");
-        mGenderSpinner.setSelection(0); // Select "Unknown" gender
-    }
-
-    //Hides delete if it is a new pet
-    //This method is called after invalidateOptionsMenu(), so that the menu can be updated
-    //some menu items can be hidden or made visible
-    @Override
-    public boolean onPrepareOptionsMenu(Menu menu){
-        super.onPrepareOptionsMenu(menu);
-        //If this is a new pet, hide the "Delete" menu item.
-        if(mCurrentPetUri==null){
-            MenuItem menuItem = menu.findItem(R.id.action_delete);
-            menuItem.setVisible(false);
-        }
-        return true;
-    }
-
     private void showDeleteConfirmationDialog() {
         // Create an AlertDialog.Builder and set the message, and click listeners
         // for the postivie and negative buttons on the dialog.
@@ -452,27 +422,93 @@ public class EditorActivity extends AppCompatActivity implements LoaderManager.L
      */
     private void deletePet(){
 // Only perform the delete if this is an existing pet.
-        if (mCurrentPetUri != null) {
-            // Call the ContentResolver to delete the pet at the given content URI.
-            // Pass in null for the selection and selection args because the mCurrentPetUri
-            // content URI already identifies the pet that we want.
-            int rowsDeleted = getContentResolver().delete(mCurrentPetUri, null, null);
-
-            // Show a toast message depending on whether or not the delete was successful.
-            if (rowsDeleted == 0) {
-                // If no rows were deleted, then there was an error with the delete.
-                Toast.makeText(this, getString(R.string.editor_delete_pet_failed),
-                        Toast.LENGTH_SHORT).show();
-            } else {
-                // Otherwise, the delete was successful and we can display a toast.
-                Toast.makeText(this, getString(R.string.editor_delete_pet_successful),
-                        Toast.LENGTH_SHORT).show();
-            }
+        if (mPetId != DEFAULT_PET_ID) {
+            new DeletePetTask(getApplicationContext()).execute(mPetId);
         }
-
-        // Close the activity
         finish();
     }
 
+    private static class InsertPetTask extends AsyncTask<PetEntry, Void, Long>{
+        private final WeakReference<Context> weakAppContext;
+
+        InsertPetTask(Context appContext){
+            this.weakAppContext = new WeakReference<>(appContext);
+        }
+
+        @Override
+        protected Long doInBackground(PetEntry... petEntries){
+            PetsDatabase database = PetsDatabase.getInstance(weakAppContext.get());
+            return database.petDao().insertPet(petEntries[0]);
+        }
+
+        @Override
+        protected void onPostExecute(Long result){
+            if(result != (long) -1){
+                Toast.makeText(weakAppContext.get(), weakAppContext.get().getString(R.string.editor_insert_pet_successful), Toast.LENGTH_LONG).show();
+            }else{
+                Toast.makeText(weakAppContext.get(), weakAppContext.get().getString(R.string.editor_insert_pet_failed), Toast.LENGTH_LONG).show();
+            }
+        }
+    }
+
+    private static class UpdatePetTask extends AsyncTask<PetEntry, Void, Integer> {
+
+        private final WeakReference<Context> weakAppContext;
+
+        UpdatePetTask(Context AppContext) {
+            this.weakAppContext = new WeakReference<>(AppContext);
+        }
+
+        @Override
+        protected Integer doInBackground(PetEntry... petEntries) {
+            PetsDatabase database = PetsDatabase.getInstance(weakAppContext.get());
+            return database.petDao().updatePet(petEntries[0]);
+        }
+
+        @Override
+        protected void onPostExecute(Integer result) {
+            // Show a toast message depending on whether or not the insertion was successful.
+            if (result == 0) {
+                // If no rows were affected, then there was an error with the update.
+                Toast.makeText(weakAppContext.get(), weakAppContext.get().getString(R.string.editor_update_pet_failed),
+                        Toast.LENGTH_SHORT).show();
+
+            } else {
+                // Otherwise, the update was successful and we can display a toast.
+                Toast.makeText(weakAppContext.get(), weakAppContext.get().getString(R.string.editor_update_pet_successful),
+                        Toast.LENGTH_SHORT).show();
+            }
+        }
+    }
+
+    private static class DeletePetTask extends AsyncTask<Integer, Void, Integer> {
+
+        private final WeakReference<Context> weakAppContext;
+
+        DeletePetTask(Context AppContext) {
+            this.weakAppContext = new WeakReference<>(AppContext);
+        }
+
+        @Override
+        protected Integer doInBackground(Integer... ids) {
+            PetsDatabase database = PetsDatabase.getInstance(weakAppContext.get());
+            return database.petDao().deletePet(ids[0]);
+        }
+
+        @Override
+        protected void onPostExecute(Integer result) {
+            // Show a toast message depending on whether or not the insertion was successful.
+            if (result == 0) {
+                // If no rows were affected, then there was an error with the delete.
+                Toast.makeText(weakAppContext.get(), weakAppContext.get().getString(R.string.editor_delete_pet_failed),
+                        Toast.LENGTH_SHORT).show();
+
+            } else {
+                // Otherwise, the delete was successful and we can display a toast.
+                Toast.makeText(weakAppContext.get(), weakAppContext.get().getString(R.string.editor_delete_pet_successful),
+                        Toast.LENGTH_SHORT).show();
+            }
+        }
+    }
 
 }
