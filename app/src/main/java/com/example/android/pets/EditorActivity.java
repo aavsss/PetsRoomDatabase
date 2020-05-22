@@ -77,11 +77,6 @@ public class EditorActivity extends AppCompatActivity {
         }
     };
 
-    /**Identifier for the pet data loader*/
-    private static final int EXISTING_PET_LOADER = 0;
-
-    /**Content URI for the existing pet (null if it's a new pet)*/
-    private Uri mCurrentPetUri;
 
     /** EditText field to enter the pet's name */
     private EditText mNameEditText;
@@ -107,11 +102,14 @@ public class EditorActivity extends AppCompatActivity {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_editor);
 
+        //Initializing Database
         mDb = PetsDatabase.getInstance(getApplicationContext());
 
         initViews();
         setupSpinner();
 
+        //Called if any previous stance of the activity is saved.
+        //Previous instance is stored or the default value of 1 is stored.
         if(savedInstanceState != null && savedInstanceState.containsKey(INSTANCE_PET_ID)){
             mPetId = savedInstanceState.getInt(INSTANCE_PET_ID, DEFAULT_PET_ID);
         }
@@ -119,13 +117,16 @@ public class EditorActivity extends AppCompatActivity {
         //Examine the intent that used to launch this activity
         Intent intent = getIntent();
 
+        //If we came from catalog activity
         if(intent != null && intent.hasExtra(EXTRA_PET_ID)){
 
             setTitle(getString(R.string.editor_activity_title_edit_pet));
 
+            //mPedId is initiated to DEFAULT_PET_ID at onCreate().
             if(mPetId == DEFAULT_PET_ID){
                 //Populate the UI
                 mPetId = intent.getIntExtra(EXTRA_PET_ID, DEFAULT_PET_ID);
+                //Sent argument in factory here
                 AddPetViewModelFactory factory = new AddPetViewModelFactory(mDb, mPetId);
                 final AddPetViewModel viewModel =
                         ViewModelProviders.of(EditorActivity.this,
@@ -139,7 +140,7 @@ public class EditorActivity extends AppCompatActivity {
                 });
             }
         }else{
-            //Otherwise this is an exisitng pet, so change app bar to say "Edit Pet"
+            //This is a new pet, so change the app bar to say "Add a Pet"
             setTitle(getString(R.string.editor_activity_title_new_pet));
 
             invalidateOptionsMenu();
@@ -148,6 +149,7 @@ public class EditorActivity extends AppCompatActivity {
 
     }
 
+    //Called after/before to save the instance of the activity
     @Override
     protected void onSaveInstanceState(Bundle outState){
         outState.putInt(INSTANCE_PET_ID, mPetId);
@@ -169,6 +171,7 @@ public class EditorActivity extends AppCompatActivity {
         mGenderSpinner.setOnTouchListener(mTouchListener);
 
     }
+
 
     private void populateUI(PetEntry pet){
         if (pet == null){

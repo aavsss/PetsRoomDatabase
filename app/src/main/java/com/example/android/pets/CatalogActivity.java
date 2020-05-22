@@ -82,6 +82,7 @@ public class CatalogActivity extends AppCompatActivity {
         petListView.setAdapter(mAdapter);
 
         //Setup the item Click Listener
+        //Sending intent with the ID of the pet selected.
         petListView.setOnItemClickListener(new AdapterView.OnItemClickListener() {
             @Override
             public void onItemClick(AdapterView<?> adapterView, View view, int position, long id) {

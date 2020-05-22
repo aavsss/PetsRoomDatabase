@@ -13,7 +13,10 @@ import java.util.List;
 @Dao
 public interface PetDao {
 
-    //We need to create a new interface — let’s call it PetDao. Add the @Dao annotation and then we need to define the methods we need. For insert, update, or delete (if done passing an object, not just an id) we don’t need to type in any query, for example, the insert looks like this:
+    //We need to create a new interface — let’s call it PetDao.
+    // Add the @Dao annotation and then we need to define the methods we need.
+    // For insert, update, or delete (if done passing an object, not just an id) we don’t need to type in any query,
+    // for example, the insert looks like this:
     @Insert
     long insertPet(PetEntry petEntry);
 

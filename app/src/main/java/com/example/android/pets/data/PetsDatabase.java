@@ -15,6 +15,10 @@ public abstract class PetsDatabase extends RoomDatabase {
     private static final String DATABASE_NAME = "pets_shelter";
     private static PetsDatabase INSTANCE;
 
+//    We don’t need several instances of our database, moreover,
+//    we need to ensure we are always using the same instance and
+//    make sure we are not accidentally creating more than one at
+//    a time, for which we use the singleton pattern:
     public static PetsDatabase getInstance(Context context){
         if(INSTANCE == null){
             synchronized (LOCK){
